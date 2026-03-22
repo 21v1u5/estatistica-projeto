@@ -18,7 +18,7 @@ with st.sidebar:
         st.write("Configurar Intervalo:")
         c_esq, c_dir = st.columns(2)
         s_esq = c_esq.selectbox("Início", options=["[ (Fechado)", "] (Aberto)"])
-        s_dir = c_dir.selectbox("Fim", options=["] (Aberto)", "[ (Fechado)"])
+        s_dir = c_dir.selectbox("Fim", options=["[ (Fechado)", "] (Aberto)"])
         
         col1, col2 = st.columns(2)
         li = col1.number_input("Limite Inferior", format="%.2f")
@@ -29,7 +29,18 @@ with st.sidebar:
             if ls <= li:
                 st.error("O limite superior deve ser maior que o inferior.")
             else:
-                txt_int = f"{s_esq[0]} {li:.2f} , {ls:.2f} {s_dir[0]}"
+                # CORREÇÃO DO BUG DE FECHADO (Simbologia Apostila pág. 11)
+                is_fechado_esq = "[" in s_esq
+                is_fechado_dir = "[" in s_dir
+                
+                if is_fechado_esq and is_fechado_dir:
+                    simbolo = "|-|" # Fechado nos dois lados
+                elif is_fechado_esq and not is_fechado_dir:
+                    simbolo = "├"   # Fechado à esquerda, aberto à direita
+                else:
+                    simbolo = "—"   # Caso genérico
+                
+                txt_int = f"{li:.2f} {simbolo} {ls:.2f}"
                 novo = pd.DataFrame([[txt_int, li, ls, fi]], columns=['Intervalo', 'Li', 'Ls', 'fi'])
                 st.session_state.df_dados = pd.concat([st.session_state.df_dados, novo], ignore_index=True)
 
@@ -47,18 +58,19 @@ if not st.session_state.df_dados.empty:
     df['fr (%)'] = (df['fi'] / n) * 100 
     df['fi_xi'] = df['fi'] * df['xi'] 
     
+    # Amplitude (h) baseada na primeira classe
     h = df.iloc[0]['Ls'] - df.iloc[0]['Li']
 
-    # MÉDIA
+    # MÉDIA (pág. 14)
     media = df['fi_xi'].sum() / n
     
-    # MEDIANA
+    # MEDIANA (pág. 18)
     pos_me = n / 2
     idx_me = df[df['Fac'] >= pos_me].index[0]
     fant = df.iloc[idx_me-1]['Fac'] if idx_me > 0 else 0
     mediana = df.iloc[idx_me]['Li'] + (((pos_me - fant) * h) / df.iloc[idx_me]['fi'])
     
-    # MODA (Czuber)
+    # MODA (Fórmula de Czuber - pág. 20)
     idx_mo = df['fi'].idxmax()
     f_mo = df.iloc[idx_mo]['fi']
     f_ant = df.iloc[idx_mo-1]['fi'] if idx_mo > 0 else 0
@@ -67,15 +79,16 @@ if not st.session_state.df_dados.empty:
     delta2 = f_mo - f_pos 
     moda = df.iloc[idx_mo]['Li'] + (delta1 * h) / (delta1 + delta2) if (delta1 + delta2) != 0 else df.iloc[idx_mo]['xi']
 
-    # VARIÂNCIA AMOSTRAL (S²)
-    df['xi2_fi'] = (df['xi']**2) * df['fi']
-    soma_xi_fi = df['fi_xi'].sum()
-    soma_xi2_fi = df['xi2_fi'].sum()
-    variancia = (1/(n-1)) * (soma_xi2_fi - (soma_xi_fi**2 / n))
-    
-    # DESVIO PADRÃO E ERRO PADRÃO
-    desvio = np.sqrt(variancia)
-    erro = desvio / np.sqrt(n)
+    # VARIÂNCIA AMOSTRAL (S² - pág. 23)
+    if n > 1:
+        df['xi2_fi'] = (df['xi']**2) * df['fi']
+        soma_xi_fi = df['fi_xi'].sum()
+        soma_xi2_fi = df['xi2_fi'].sum()
+        variancia = (1/(n-1)) * (soma_xi2_fi - (soma_xi_fi**2 / n))
+        desvio = np.sqrt(variancia)
+        erro = desvio / np.sqrt(n)
+    else:
+        variancia = desvio = erro = 0.0
 
     # --- EXIBIÇÃO ---
     st.subheader("📋 Tabela de Distribuição de Frequências")
@@ -94,6 +107,9 @@ if not st.session_state.df_dados.empty:
     c4.metric("Variância (s²)", f"{variancia:.4f}")
     c5.metric("Desvio Padrão (s)", f"{desvio:.4f}")
     c6.metric("Erro Padrão", f"{erro:.4f}")
+    
+    if n <= 1:
+        st.warning("Variância e Desvio Padrão requerem n > 1.")
 
 else:
     st.info("ℹ️ Adicione as classes na barra lateral para iniciar os cálculos.")
