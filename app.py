@@ -6,7 +6,6 @@ import numpy as np
 st.set_page_config(page_title="Estatística UNDB - Dados Agrupados", layout="wide")
 
 st.title("📊 Estatística Descritiva: Dados Agrupados")
-st.markdown("Sistema para cálculo de frequências e medidas de dispersão baseado na metodologia UNDB.")
 
 # --- ESTADO DA SESSÃO ---
 if 'df_dados' not in st.session_state:
