@@ -2,101 +2,121 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# Configuração da Página
-st.set_page_config(page_title="Calculadora de Estatística Agrupada", layout="wide")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="Estatística UNDB - Dados Agrupados", layout="wide")
 
 st.title("📊 Estatística Descritiva: Dados Agrupados")
-st.markdown("""
-Esta ferramenta calcula medidas de tendência central e dispersão para dados organizados em **classes (intervalos)**.
-""")
+st.markdown("Sistema para cálculo de frequências e medidas de dispersão baseado na metodologia UNDB.")
 
 # --- ESTADO DA SESSÃO ---
-# Inicializa a lista de dados se não existir
 if 'df_dados' not in st.session_state:
-    st.session_state.df_dados = pd.DataFrame(columns=['Limite Inferior', 'Limite Superior', 'Frequência'])
+    st.session_state.df_dados = pd.DataFrame(columns=['Intervalo', 'Li', 'Ls', 'fi'])
 
 # --- SIDEBAR: ENTRADA DE DADOS ---
 with st.sidebar:
-    st.header("Entrada de Dados")
+    st.header("📥 Entrada de Dados")
     with st.form("add_data", clear_on_submit=True):
+        st.write("Configurar Intervalo:")
+        c_esq, c_dir = st.columns(2)
+        s_esq = c_esq.selectbox("Início", options=["[ (Fechado)", "] (Aberto)"])
+        s_dir = c_dir.selectbox("Fim", options=["] (Aberto)", "[ (Fechado)"])
+        
         col1, col2 = st.columns(2)
         li = col1.number_input("Limite Inferior", format="%.2f")
         ls = col2.number_input("Limite Superior", format="%.2f")
-        fi = st.number_input("Frequência (fi)", min_value=1, step=1)
+        fi = st.number_input("Frequência Absoluta (fi)", min_value=1, step=1)
         
-        submitted = st.form_submit_button("Adicionar Classe")
-        
-        if submitted:
+        if st.form_submit_button("Adicionar Classe"):
             if ls <= li:
                 st.error("O limite superior deve ser maior que o inferior.")
             else:
-                novo_dado = pd.DataFrame([[li, ls, fi]], columns=['Limite Inferior', 'Limite Superior', 'Frequência'])
-                st.session_state.df_dados = pd.concat([st.session_state.df_dados, novo_dado], ignore_index=True)
+                txt_int = f"{s_esq[0]} {li:.2f} , {ls:.2f} {s_dir[0]}"
+                novo = pd.DataFrame([[txt_int, li, ls, fi]], columns=['Intervalo', 'Li', 'Ls', 'fi'])
+                st.session_state.df_dados = pd.concat([st.session_state.df_dados, novo], ignore_index=True)
 
-    if st.button("Limpar Tudo"):
-        st.session_state.df_dados = pd.DataFrame(columns=['Limite Inferior', 'Limite Superior', 'Frequência'])
+    if st.button("🗑️ Limpar Tudo"):
+        st.session_state.df_dados = pd.DataFrame(columns=['Intervalo', 'Li', 'Ls', 'fi'])
         st.rerun()
 
-# --- CORPO PRINCIPAL ---
+# --- PROCESSAMENTO E CÁLCULOS ---
 if not st.session_state.df_dados.empty:
     df = st.session_state.df_dados.copy()
     
-    # 1. Cálculos de Base
-    df['Ponto Médio (xi)'] = (df['Limite Inferior'] + df['Limite Superior']) / 2
-    df['fi * xi'] = df['Frequência'] * df['Ponto Médio (xi)']
-    df['Frequência Acumulada (Fi)'] = df['Frequência'].cumsum()
+    n = df['fi'].sum()
+    df['xi'] = (df['Li'] + df['Ls']) / 2 
+    df['Fac'] = df['fi'].cumsum() 
+    df['fr (%)'] = (df['fi'] / n) * 100 
+    df['fi_xi'] = df['fi'] * df['xi'] 
     
-    n = df['Frequência'].sum()
-    h = df.iloc[0]['Limite Superior'] - df.iloc[0]['Limite Inferior'] # Amplitude da classe
-    
-    st.subheader("Tabela de Distribuição")
-    st.dataframe(df, use_container_width=True)
+    h = df.iloc[0]['Ls'] - df.iloc[0]['Li']
 
-    # --- PROCESSAMENTO MATEMÁTICO ---
+    # MÉDIA
+    media = df['fi_xi'].sum() / n
     
-    # MÉDIA: Σ(fi * xi) / n
-    media = df['fi * xi'].sum() / n
+    # MEDIANA
+    pos_me = n / 2
+    idx_me = df[df['Fac'] >= pos_me].index[0]
+    fant = df.iloc[idx_me-1]['Fac'] if idx_me > 0 else 0
+    mediana = df.iloc[idx_me]['Li'] + (((pos_me - fant) * h) / df.iloc[idx_me]['fi'])
     
-    # MEDIANA: Li + [((n/2) - Fant) / fi] * h
-    me_pos = n / 2
-    idx_mediana = df[df['Frequência Acumulada (Fi)'] >= me_pos].index[0]
-    classe_mediana = df.iloc[idx_mediana]
-    fant = df.iloc[idx_mediana-1]['Frequência Acumulada (Fi)'] if idx_mediana > 0 else 0
-    mediana = classe_mediana['Limite Inferior'] + ((me_pos - fant) / classe_mediana['Frequência']) * h
-    
-    # MODA (Czuber): Li + [(fi - fi_ant) / ((fi - fi_ant) + (fi - fi_post))] * h
-    idx_moda = df['Frequência'].idxmax()
-    classe_moda = df.iloc[idx_moda]
-    fi_atual = classe_moda['Frequência']
-    fi_ant = df.iloc[idx_moda-1]['Frequência'] if idx_moda > 0 else 0
-    fi_post = df.iloc[idx_moda+1]['Frequência'] if idx_moda < len(df)-1 else 0
-    
-    # Prevenção de divisão por zero se todas as frequências forem iguais
-    denominador_moda = (fi_atual - fi_ant) + (fi_atual - fi_post)
-    moda = classe_moda['Limite Inferior'] + ((fi_atual - fi_ant) / denominador_moda) * h if denominador_moda != 0 else classe_moda['Ponto Médio (xi)']
+    # MODA (Czuber)
+    idx_mo = df['fi'].idxmax()
+    f_mo = df.iloc[idx_mo]['fi']
+    f_ant = df.iloc[idx_mo-1]['fi'] if idx_mo > 0 else 0
+    f_pos = df.iloc[idx_mo+1]['fi'] if idx_mo < len(df)-1 else 0
+    delta1 = f_mo - f_ant 
+    delta2 = f_mo - f_pos 
+    moda = df.iloc[idx_mo]['Li'] + (delta1 * h) / (delta1 + delta2) if (delta1 + delta2) != 0 else df.iloc[idx_mo]['xi']
 
-    # VARIÂNCIA: Σ [fi * (xi - media)²] / (n - 1)
-    df['fi * (xi-media)^2'] = df['Frequência'] * ((df['Ponto Médio (xi)'] - media)**2)
-    variancia = df['fi * (xi-media)^2'].sum() / (n - 1)
-    desvio_padrao = np.sqrt(variancia)
-    erro_padrao = desvio_padrao / np.sqrt(n)
-
-    # --- EXIBIÇÃO DOS RESULTADOS ---
-    st.divider()
-    st.subheader("Resultados Estatísticos")
+    # VARIÂNCIA AMOSTRAL (S²)
+    df['xi2_fi'] = (df['xi']**2) * df['fi']
+    soma_xi_fi = df['fi_xi'].sum()
+    soma_xi2_fi = df['xi2_fi'].sum()
+    variancia = (1/(n-1)) * (soma_xi2_fi - (soma_xi_fi**2 / n))
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Média (x̄)", f"{media:.4f}")
-    m2.metric("Mediana (Md)", f"{mediana:.4f}")
-    m3.metric("Moda (Mo)", f"{moda:.4f}")
-    
-    d1, d2, d3 = st.columns(3)
-    d1.metric("Variância (s²)", f"{variancia:.4f}")
-    d2.metric("Desvio Padrão (s)", f"{desvio_padrao:.4f}")
-    d3.metric("Erro Padrão", f"{erro_padrao:.4f}")
+    # DESVIO PADRÃO E ERRO PADRÃO
+    desvio = np.sqrt(variancia)
+    erro = desvio / np.sqrt(n)
 
-    # Visualização opcional
-    st.bar_chart(df.set_index('Ponto Médio (xi)')['Frequência'])
+    # --- EXIBIÇÃO ---
+    st.subheader("📋 Tabela de Distribuição de Frequências")
+    df_view = df[['Intervalo', 'fi', 'xi', 'Fac', 'fr (%)']].copy()
+    df_view.rename(columns={'fi': 'fi', 'xi': 'xi (Ponto Médio)', 'Fac': 'Fac (Acumulada)', 'fr (%)': 'fr (%) (Relativa)'}, inplace=True)
+    df_view['fr (%) (Relativa)'] = df_view['fr (%) (Relativa)'].map("{:.2f}%".format)
+    st.table(df_view)
+
+    st.subheader("📊 Resultados Estatísticos")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Média (x̄)", f"{media:.4f}")
+    c2.metric("Mediana (Md)", f"{mediana:.4f}")
+    c3.metric("Moda (Mo)", f"{moda:.4f}")
+    
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Variância (s²)", f"{variancia:.4f}")
+    c5.metric("Desvio Padrão (s)", f"{desvio:.4f}")
+    c6.metric("Erro Padrão", f"{erro:.4f}")
 
 else:
-    st.info("Aguardando inserção de dados na barra lateral para calcular...")
+    st.info("ℹ️ Adicione as classes na barra lateral para iniciar os cálculos.")
+
+# --- SEÇÃO DE FÓRMULAS OCULTA ---
+st.divider()
+with st.expander("📝 Mostrar Fórmulas e Memorial de Cálculo"):
+    st.subheader("📚 Referências Matemáticas")
+    f_col1, f_col2 = st.columns(2)
+    
+    with f_col1:
+        st.markdown("**1. Média Aritmética**")
+        st.latex(r"\bar{x} = \frac{\sum (x_i \cdot f_i)}{n}")
+        st.markdown("**2. Mediana**")
+        st.latex(r"Md = l_{Md} + \frac{(\frac{n}{2} - FAC_{ant}) \cdot h}{F_{Md}}")
+        st.markdown("**3. Moda (Fórmula de Czuber)**")
+        st.latex(r"Mo = l_{Mo} + \frac{\Delta_1 \cdot h}{\Delta_1 + \Delta_2}")
+
+    with f_col2:
+        st.markdown("**4. Variância Amostral (S²)**")
+        st.latex(r"S^2 = \frac{1}{n-1} \left[ \sum x_i^2 f_i - \frac{(\sum x_i f_i)^2}{n} \right]")
+        st.markdown("**5. Desvio Padrão**")
+        st.latex(r"S = \sqrt{S^2}")
+        st.markdown("**6. Erro Padrão**")
+        st.latex(r"EP = \frac{S}{\sqrt{n}}")
